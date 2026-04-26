@@ -1,0 +1,93 @@
+---
+title: "Bayesian Mixed Graphical Model - Example"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(
+  collapse = TRUE,
+  comment = "#>",
+  fig.align = "center"
+)
+```
+
+## Introduction
+
+In this example, we illustrate the use of the `BMGM` package to infer conditional independence relationships among mixed-type variables using data from the **NHANES** study. Our model can handle continuous, binary, and count variables, and allows for missing values using a data augmentation strategy.
+
+## Load required packages
+
+```{r load-packages}
+library(BMGM)
+library(dplyr)
+library(qgraph)
+```
+
+## Data Preparation
+
+The data has 5 columns (variables represeting for different nodes - wards), 120 rows (observations represeting for the number of patients in each month - 120 months = 10 years) and no missing values. The distribution of observations can be seem as zero inflated poisson. The variables are:
+
+- **ICU**: Number of patients in the Intensive Care Unit (ICU)
+- **Ward_A**: Number of patients in Ward A
+- **Ward_B**: Number of patients in Ward B
+- **Ward_C**: Number of patients in Ward C
+- **Ward_D**: Number of patients in Ward D
+
+```{r data-prep}
+set.seed(123)
+var_names <- c("ICU", "Ward_A", "Ward_B", "Ward_C", "Ward_D")
+
+Beta <- matrix(c(
+    1, 0.5, 0.5, 0.5, 0.5,
+    0.5, 1, 0.5, 0.5, 0.5,
+    0.5, 0.5, 1, 0.5, 0.5,
+    0.5, 0.5, 0.5, 1, 0.5,
+    0.5, 0.5, 0.5, 0.5, 1
+), nrow = 5, byrow = TRUE)
+
+type <- c('z', 'z', 'z', 'z', 'z')
+gamma <- 1
+theta <- list(c(0.15,2), c(0.15,2), c(0.15,2), c(0.15,2), c(0.15,2))
+categories <- rep(1, 5)  # All variables are zero-inflated counts
+M <- 1000
+std <- rep(1, 5)
+X_new <- rep(0,5)
+variables = rep(1,5)
+
+
+data <- sampler_bmgm(n = 120, Beta = Beta, type = type, theta = theta, lambda = gamma, std = std, categories = categories, M = M, X_new = X_new, variables = variables)
+```
+
+## Fit the Model
+
+We run the Bayesian mixed graphical model with default priors and 2,000 burn-in and sampling iterations. You can increase this number for more stable results.
+
+```{r model-fit}
+fit <- bmgm(data, type = type, nburn = 2000, nsample = 2000, seed = 123)
+```
+
+## Visualize the Inferred Graph
+
+We use the `qgraph` package to visualize the graph. Edge width corresponds to the strength of the relationship, and edge color indicates direction:
+
+- **Green** = positive interaction  
+- **Red** = negative interaction  
+
+```{r plot-graph, warning=FALSE}
+qgraph(
+  fit$adj_Beta,
+  labels = var_names,
+  edge.color = ifelse(fit$adj_Beta > 0, "darkgreen", "firebrick"),
+  edge.width = abs(fit$adj_Beta)*2,
+  layout = "spring",
+  vsize = 6
+)
+```
+
+## Summary
+
+This vignette demonstrates how to use the `BMGM` package to analyze real-world health data involving mixed variable types. The method flexibly models continuous, binary, and count variables, and is robust to small amounts of missing data. Future work may extend this example to include zero-inflated variables or longitudinal data.
+
+## Saving workspace
+```{r save-workspace}
+save.image("BMGM_example_workspace.RData")
+```
