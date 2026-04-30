@@ -192,7 +192,7 @@ bmgm <- function(X, type, nburn = 1000, nsample = 1000, theta_priors,
     theta_priors[[s]] <- switch(type[s],
                                 "c" = c(mean_mu = 0.001, mean_sd = 0.001, sd_shape = 0.001, sd_rate = 0.001),
                                 "d" = c(mu_shape = 0.001, mu_rate = 0.001, nu_shape = 0.001, nu_rate = 0.001),
-                                "z" = c(p_shape1 = 0.001, p_shape2 = 0.001, mu_shape = 0.001, mu_rate = 0.001),
+                                "z" = c(p_shape1 = 0.001, p_shape2 = 0.001, mu_shape = 0.001, mu_rate = 0.001), # p ~ Beta(0.001, 0.001), mu ~ Gamma(0.001, 0.001)
                                 "m" = rep(1 / (categories[s] + 1), categories[s] + 1))
   }
 
@@ -210,12 +210,12 @@ bmgm <- function(X, type, nburn = 1000, nsample = 1000, theta_priors,
     theta[[s]] <- switch(type[s],
                          'c' = c(0,1),
                          'd' = c(0.1, 1),
-                         'z' = c(0.5, 1),
+                         'z' = c(0.5, 1), # initial p = 0.5, mu = 1
                          'm' = rep(1/(categories[s]+1), categories[s]+1))
   }
 
   # Initial variance for steps in MCMC
-  h_beta <- rep(0.1, q)
+  h_beta <- rep(0.1, q) # Initial proposal variance for Beta updates, can be tuned for better acceptance rates
   h_theta <- list()
   scale_theta <- c()
   for(s in 1:p){
@@ -223,7 +223,7 @@ bmgm <- function(X, type, nburn = 1000, nsample = 1000, theta_priors,
                            'c' = diag(0.1, 2),
                            'd' = diag(c(0.01, 0.01)),
                            'm' = diag(0.1, categories[s]+1),
-                           'z' = diag(c(0.005, 0.5)))
+                           'z' = diag(c(0.005, 0.5))) 
 
     scale_theta[s] <- switch(type[s],
                              'c' = 2.4^2/2,
@@ -261,7 +261,7 @@ bmgm <- function(X, type, nburn = 1000, nsample = 1000, theta_priors,
     log(apply(parameters, 1, function(x) max(sum(un_llk_z(domain, theta = x)), 1e-300)))
   }
 
-  log_norm_constant_Z <- function(s, parameters){
+  log_norm_constant_Z <- function(s, parameters){ ## Normalizing constant for zero-inflated model 
     domain <- 0:B
     se <- std_err[s]
     un_llk <- function(x, theta){
@@ -288,86 +288,6 @@ bmgm <- function(X, type, nburn = 1000, nsample = 1000, theta_priors,
 
       #Proposal
       switch(type[s],
-             'c' = {
-               #sampling mu
-               mu0 = theta_priors[[s]][1]
-               tau0 = theta_priors[[s]][2]
-
-               mu = means[s]#mean(X[,s])
-               tao = theta_s[2]
-
-               var_post <- tau0 + n*tao
-               mean_post <- (tau0*mu0 + n*tao*mu)/var_post
-
-               #adding norm. constant
-               C_s = sum(c(F_scaled[,-cols_s, drop=FALSE]%*%Beta[cols_s,-cols_s]))
-
-               mean_post <- mean_post - (1/var_post)*C_s
-               theta_s[1] <- rnorm(1, mean = mean_post, sd = 1/sqrt(var_post))
-
-               #sampling tau. In this case we need MCMC
-
-               tau <- theta_s[2]
-               mu <- theta_s[1]
-               tau_proposal <- abs(rnorm(1, mean = tau, h_theta_s))
-
-               a0 = theta_priors[[s]][3]
-               b0 = theta_priors[[s]][4]
-
-               shape_post = a0 + n/2
-               rate_post = b0 + 0.5*sum((X[,s] - mu)^2)
-
-               C_s_2 = sum(c(F_scaled[,-cols_s, drop=FALSE]%*%Beta[cols_s,-cols_s])^2)
-
-               ar <- dgamma(tau_proposal, shape = shape_post,rate = rate_post, log = TRUE) -
-                 dgamma(tau, shape = shape_post, rate = rate_post, log = TRUE) +
-                 C_s_2/2*(1/tau - 1/tau_proposal)
-
-               accept <- min(1, exp(ar))
-
-               if(stats::runif(1) < accept){
-                 theta_s[2] <- tau_proposal
-                 ac_theta[s] <- ac_theta[s] + 1
-               }
-
-             },
-             'd' = {
-               theta_star <- abs(MASS::mvrnorm(n = 1, mu = c(theta_s[1], theta_s[2]),
-                                               Sigma = h_theta_s))
-
-               C_s = c(F_scaled[,-cols_s, drop=FALSE]%*%Beta[cols_s,-cols_s])
-
-               param_s <- cbind('mu' = rep(theta_s[1], n), 'nu' = rep(theta_s[2], n), 'edge' = C_s)
-               param_star <- cbind('mu' = rep(theta_star[1], n), 'nu' = rep(theta_star[2], n), 'edge' = C_s)
-
-               log_Z_s <- sum(log_norm_constant(cols_s, param_s))
-               log_Z_star <- sum(log_norm_constant(cols_s, param_star))
-
-               log_density_d <- sum(theta_s[2]*(log(theta_s[1])*X[,s] - lfactorial(X[,s])))
-               log_density_d_star <- sum(theta_star[2]*(log(theta_star[1])*X[,s] - lfactorial(X[,s])))
-
-               theta_priors_s <- theta_priors[[s]]
-
-               log_prior_d <- dgamma(theta_s[1], shape = theta_priors_s[1], rate = theta_priors_s[2], log = TRUE) +
-                 dgamma(theta_s[2], shape = theta_priors_s[3], rate = theta_priors_s[4], log = TRUE)
-
-               log_prior_d_star <- dgamma(theta_star[1], shape = theta_priors_s[1], rate = theta_priors_s[2], log = TRUE) +
-                 dgamma(theta_star[2], shape = theta_priors_s[3], rate = theta_priors_s[4], log = TRUE)
-
-               #acceptance:
-
-               log_ar <- log_density_d_star - log_density_d +
-                 log_prior_d_star - log_prior_d +
-                 log_Z_s - log_Z_star
-
-               accept <- min(1, exp(log_ar))
-
-               if(stats::runif(1) < accept){
-                 theta_s <- theta_star
-                 ac_theta[s] <- ac_theta[s] + 1
-               }
-
-             },
              'z' = {
                theta_star <- c(mnormt::rmtruncnorm(n = 1, mean = theta_s[1], varcov = h_theta_s[1,1], lower = 0, upper = 1),
                                abs(rnorm(n = 1, mean = theta_s[2], sd = h_theta_s[2,2])))
@@ -400,54 +320,6 @@ bmgm <- function(X, type, nburn = 1000, nsample = 1000, theta_priors,
                log_ar <- dbeta(theta_star[1], post_s1, post_s2, log = TRUE) - dbeta(theta_s[1], post_s1, post_s2, log = TRUE) +
                  dgamma(theta_star[2], post_alpha, post_beta, log = TRUE) - dgamma(theta_s[2], post_alpha, post_beta, log = TRUE) +
                  log_Z_s - log_Z_star
-
-               accept <- min(1, exp(log_ar))
-
-               if(stats::runif(1) < accept){
-                 theta_s <- theta_star
-                 ac_theta[s] <- ac_theta[s] + 1
-               }
-             },
-             'm' = {
-               theta_star <- abs(MASS::mvrnorm(n = 1, mu = theta_s, Sigma = h_theta_s))
-               theta_star <- theta_star/sum(theta_star)
-
-               cat = as.numeric(factor(X[,s]))
-               #edge-potentials
-               cols = which(var_names == s)
-               se <- std_err[cols]
-               C_s <- F_scaled[,-cols, drop = FALSE]%*%Beta[-cols, cols]
-
-               theta_s <- pmax(theta_s, 1e-10)
-               theta_star <- pmax(theta_star, 1e-10)
-
-               log_theta_mat <- matrix(log(theta_s[-1]), nrow = n, ncol = length(theta_s) - 1, byrow = TRUE)
-               C_scaled <- sweep(C_s, 2, se, "/")
-
-               log_theta_star_mat <- matrix(log(theta_star[-1]), nrow = n, ncol = length(theta_star) - 1, byrow = TRUE)
-
-               # Log-space computation to avoid underflow
-               log_un_llk <- cbind(log(theta_s[1]), log_theta_mat - C_scaled)
-               log_un_llk_star <- cbind(log(theta_star[1]), log_theta_star_mat - C_scaled)
-
-               # Vectorized log-sum-exp for normalizing constants
-               m_llk <- apply(log_un_llk, 1, max)
-               log_norm <- m_llk + log(rowSums(exp(log_un_llk - m_llk)))
-               m_llk_star <- apply(log_un_llk_star, 1, max)
-               log_norm_star <- m_llk_star + log(rowSums(exp(log_un_llk_star - m_llk_star)))
-
-               # Log-likelihood for observed categories
-               log_llk <- log_un_llk[cbind(1:n, cat)] - log_norm
-               log_llk_star <- log_un_llk_star[cbind(1:n, cat)] - log_norm_star
-
-               log_dif_llk <- sum(log_llk_star - log_llk)
-
-               prior_s <- theta_priors[[s]]
-               #priors
-               log_dif_priors <- log(gtools::ddirichlet(theta_star, prior_s)) -
-                 log(gtools::ddirichlet(theta_s, prior_s))
-
-               log_ar <- log_dif_llk + log_dif_priors
 
                accept <- min(1, exp(log_ar))
 
@@ -522,25 +394,6 @@ bmgm <- function(X, type, nburn = 1000, nsample = 1000, theta_priors,
         mvtnorm::dmvnorm(Beta_proposal, mean_proposal, var_proposal, log = TRUE)
 
       switch(type[var_names[l]],
-             'd' = {
-               param_s <- cbind('mu' = rep(theta_s[1], n),
-                                'nu' = rep(theta_s[2], n),
-                                'edge' = C_s)
-               param_star <- cbind('mu' = rep(theta_s[1], n),
-                                   'nu' = rep(theta_s[2], n),
-                                   'edge' = C_star)
-
-               log_Z_s <- sum(log_norm_constant(l, param_s))
-               log_Z_star <- sum(log_norm_constant(l, param_star))
-               log_dif_norm <- log_Z_s - log_Z_star
-             },
-             'c' = {
-               mu = theta_s[1]
-               tau = theta_s[2]
-               log_Z_s <- sum(mu*tau*C_s - C_s^2/(2*tau))
-               log_Z_star <- sum(mu*tau*C_star - C_star^2/(2*tau))
-               log_dif_norm = log_Z_s - log_Z_star
-             },
              'z' = {
                param_s <- cbind('p' = rep(theta_s[1], n),
                                 'mu' = rep(theta_s[2], n),
@@ -551,25 +404,6 @@ bmgm <- function(X, type, nburn = 1000, nsample = 1000, theta_priors,
 
                log_Z_s <- sum(log_norm_constant_Z(l, param_s))
                log_Z_star <- sum(log_norm_constant_Z(l, param_star))
-               log_dif_norm <- log_Z_s - log_Z_star
-             },
-             'm' = {
-               Beta_star <- Beta
-               Beta_star[l, -l] = Beta_star[-l,l] = Beta_proposal
-               s_m = var_names[l]
-               cat = as.numeric(factor(X[,s_m]))
-               #edge-potentials
-               cols = which(var_names == s_m)
-               se <- std_err[cols]
-               C_s <- F_scaled[,-cols, drop = FALSE]%*%Beta[-cols, cols]
-               C_star <- F_scaled[,-cols, drop = FALSE]%*%Beta_star[-cols, cols]
-
-               log_theta_mat <- matrix(log(theta_s[-1]), nrow = n, ncol = length(theta_s) - 1, byrow = TRUE)
-               un_llk <- cbind(rep(theta_s[1], n), exp(log_theta_mat - sweep(C_s, 2, se, "/")))
-               log_Z_s <- sum(log(rowSums(un_llk)))
-
-               un_llk_star <- cbind(rep(theta_s[1], n), exp(log_theta_mat - sweep(C_star, 2, se, "/")))
-               log_Z_star <- sum(log(rowSums(un_llk_star)))
                log_dif_norm <- log_Z_s - log_Z_star
              })
 
