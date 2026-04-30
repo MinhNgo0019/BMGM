@@ -152,7 +152,7 @@ sampler_bmgm <- function(n = 1, Beta, theta, type, categories, lambda,
              },
              z = {
                log_density_z <- function(x){
-                 log(tta[2])*x - lfactorial(x) -
+                 log(tta[2])*x - lfactorial(x) + ## Make change
                    edge_pot*(F_transformation(x, type = "z", parameter = lambda)/se)
                }
 

@@ -53,8 +53,7 @@ std <- rep(1, 5)
 X_new <- rep(0,5)
 variables = rep(1,5)
 
-
-data <- sampler_bmgm(n = 120, Beta = Beta, type = type, theta = theta, lambda = gamma, std = std, categories = categories, M = M, X_new = X_new, variables = variables)
+data <- sampler_bmgm(n = 1400, Beta = Beta, type = type, theta = theta, lambda = gamma, std = std, categories = categories, M = M, X_new = X_new, variables = variables)
 ```
 
 ## Fit the Model
