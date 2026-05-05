@@ -57,6 +57,7 @@
 #' }
 #'
 bmgm <- function(X, type, nburn = 1000, nsample = 1000, theta_priors,
+  
                    v_0 = 0.05, v_1 = 1, pi_beta, seed, context_spec = TRUE,
                    bfdr = 0.05, B = 100, cont = FALSE, verbose = TRUE,...){
 
@@ -252,16 +253,7 @@ bmgm <- function(X, type, nburn = 1000, nsample = 1000, theta_priors,
   colnames(post_G) <- tag_Beta[upper.tri(tag_Beta)]
   colnames(post_Beta) <- tag_Beta[upper.tri(tag_Beta)]
 
-  log_norm_constant <- function(s, parameters){
-    domain <- 0:B
-    se <- std_err[s]
-    un_llk_z <- function(x, theta)
-      exp(theta[2]*(log(theta[1])*x - lfactorial(x)) - theta[3]*F_transformation(x, type = "d", lambda)/se)
-
-    log(apply(parameters, 1, function(x) max(sum(un_llk_z(domain, theta = x)), 1e-300)))
-  }
-
-  log_norm_constant_Z <- function(s, parameters){ ## Normalizing constant for zero-inflated model 
+  log_norm_constant_Z <- function(s, parameters){ # Normalizing constant for zero-inflated model 
     domain <- 0:B
     se <- std_err[s]
     un_llk <- function(x, theta){
@@ -321,16 +313,22 @@ bmgm <- function(X, type, nburn = 1000, nsample = 1000, theta_priors,
                  dgamma(theta_star[2], post_alpha, post_beta, log = TRUE) - dgamma(theta_s[2], post_alpha, post_beta, log = TRUE) +
                  log_Z_s - log_Z_star
 
-               accept <- min(1, exp(log_ar))
+               accept <- exp(log_ar)
+               if(!is.finite(accept) || is.na(accept)){
+                  accept <- 0
+                } else {
+                  accept <- min(1, accept)
+                }
 
                if(stats::runif(1) < accept){
                  theta_s <- theta_star
                  ac_theta[s] <- ac_theta[s] + 1
                }
+               
              })
 
-      theta[[s]] <- theta_s
-      post_theta[[s]][m,] <- theta[[s]]
+      theta[[s]] <- theta_s # Update theta for variable s
+      post_theta[[s]][m,] <- theta[[s]] # Store posterior sample for theta
     }
 
     ########################### 2nd Block - Update Beta ##########################
@@ -348,16 +346,16 @@ bmgm <- function(X, type, nburn = 1000, nsample = 1000, theta_priors,
       OmegatempiU <- t(Omegai$vectors)/sqrt(eig_vals)
 
       #Update column l
-      Omega_inv <- crossprod(OmegatempiU)
+      Omega_inv <- crossprod(OmegatempiU) ## Omega^-1_(-l,-l)
 
       prior_diag <- ifelse(G[l,-l] == 0, 1/v_0, 1/v_1)
-      Ci <- eigen((S[l,l] + 1)*Omega_inv + diag(prior_diag, nrow = length(prior_diag)))
-      eig_vals_ci <- pmax(Ci$values, 1e-6)
+      Ci <- eigen((S[l,l] + 1)*Omega_inv + diag(prior_diag, nrow = length(prior_diag))) #??
+      eig_vals_ci <- pmax(Ci$values, 1e-6) #??
       CiU <- t(Ci$vectors)/sqrt(eig_vals_ci)
-      C_inv <- crossprod(CiU)
+      C_inv <- crossprod(CiU)  ## Use trick eigen decomposition for numerical stability inverting Ci
 
       #Proposal
-      mean_proposal <- -C_inv%*%mean
+      mean_proposal <- -C_inv%*%mean 
       var_proposal <- C_inv
 
       Beta_proposal <- MASS::mvrnorm(1, mean_proposal, var_proposal)
@@ -412,14 +410,14 @@ bmgm <- function(X, type, nburn = 1000, nsample = 1000, theta_priors,
       accept <- min(1, exp(log_ar))
 
       if(stats::runif(1) < accept){
-        Beta = Beta_star
+        Beta = Beta_star # Update Beta with the proposed value
         ac_Beta[l] <- ac_Beta[l] + 1
       }
     }
 
     ######################== 3rd Block - Update G and pi ===###################
-    G_new <- Beta[upper.tri(Beta)]
-    slab <- pi_beta*dnorm(G_new, 0, v_1)
+    G_new <- Beta[upper.tri(Beta)] # Get the upper triangular part of Beta (excluding diagonal) for next iteration
+    slab <- pi_beta*dnorm(G_new, 0, v_1) 
     spike <- (1-pi_beta)*dnorm(G_new, 0, v_0)
     G_new <- slab/(slab+spike)
     nan_ind <- is.nan(G_new)
